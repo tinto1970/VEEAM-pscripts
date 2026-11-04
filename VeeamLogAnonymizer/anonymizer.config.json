@@ -1,0 +1,31 @@
+// VeeamLogAnonymizer configuration (loaded automatically if it sits next to the script).
+// Lines starting with // are comments.
+{
+    // Strings to ALWAYS anonymize (customer name, site names, internal codes...).
+    // Simple string = whole-word match. Object form allows a fixed placeholder and/or substring matching
+    // (substring = replaced also inside longer words, e.g. "acme" in "acmesrv01").
+    "ExtraTerms": [
+        // "Acme",
+        // { "Original": "acme", "Anonymized": "customer01", "Substring": true }
+    ],
+
+    // Strings that must NEVER be anonymized (false positives reported in the report).
+    "KeepTerms": [
+        // "BackupServer"
+    ],
+
+    // Additional public domains that are not sensitive (vendor endpoints). *.veeam.com, *.microsoft.com,
+    // *.amazonaws.com, *.wasabisys.com, ... are already whitelisted.
+    "WhitelistDomains": [
+        // "backblazeb2.com"
+    ],
+
+    // Public IPv4 addresses without a clear network context are anonymized by default (safer).
+    "AnonymizePublicIPs": true,
+    "AnonymizeMac": true,
+    "AnonymizeIPv6": true,
+    // Decode Base64 / JWT blobs, anonymize their content and re-encode them.
+    "AnonymizeBase64": true,
+    // Minimum length of a discovered name to be replaced as a standalone word (shorter ones only inside FQDNs).
+    "MinBareTermLength": 3
+}
