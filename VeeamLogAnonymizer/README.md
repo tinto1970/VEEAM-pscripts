@@ -87,6 +87,7 @@ Example mapping (all values below are fictitious):
 | Domain SID | `S-1-5-21-1111111111-2222222222-3333333333-500` | `S-1-5-21-1000000000-1000000000-1000000001-500` |
 | MAC | `00:50:56:12:34:56` | `00:50:56:A0:00:01` (vendor OUI kept) |
 | Base64 / JWT | `c3J2LXZicjAxXEFkbWluaXN0cmF0b3I=` | decoded, anonymized and re-encoded; JWT signature removed |
+| PEM / DER blob | `-----BEGIN PRIVATE KEY-----` + base64 lines | `-----BEGIN PRIVATE KEY-----`, `REDACTED-PEM-PRIVATE-KEY`, `-----END PRIVATE KEY-----` (log line prefixes kept) |
 | Certificate thumbprint | `5A3F9C27E0B14D86A1C3F07B92E4D5A6C8B10F3E` | `AA00000000000000000000000000000000000001` (same length and format) |
 | SSL / SSH fingerprint | `ssh-rsa q8Zk3...vQk`, `46:D3:8D:...:22` | `ssh-rsa ANONFINGERPRINT000...02`, `AA:00:00:...:03` |
 | Database name | `DbName="SalesERP"`, `SalesERP_log`, `SalesERP_001.mdf` | `db001`, `db001_log`, `db001_001.mdf` (system and Veeam databases kept) |
@@ -117,6 +118,7 @@ This is how each one is handled:
 | Microsoft 365 tenant, SharePoint site URLs | ✅ | `<tenant>.onmicrosoft.com`, `<tenant>(-my).sharepoint.com` |
 | Entra ID application / tenant / subscription IDs | ✅ | GUIDs after `TenantId`, `ApplicationId`, `AppId`, `client_id`, `SubscriptionId`, `login.microsoftonline.com/<id>` |
 | Passwords, keys, tokens (not in the KB, but they happen) | ✅ | `password=`, access keys, `Bearer`, JWT, Base64 blobs |
+| PEM private keys, certificates, CSRs (not in the KB) | ✅ | `-----BEGIN ...-----` blocks in any layout (multi-line with log prefix, `~n`, `\n`, XML entities, truncated); DER certificates / keys without markers (`MII...`) |
 | SQL / Oracle / PostgreSQL / MongoDB / SAP HANA **query results** | ❌ | free text: not detectable reliably |
 | SSH **script and command output** | ❌ | free text: not detectable reliably |
 | Exchange item subjects, SharePoint / OneDrive file and list names, Teams team / channel names | ❌ | free text: use `-ExtraTerms` |

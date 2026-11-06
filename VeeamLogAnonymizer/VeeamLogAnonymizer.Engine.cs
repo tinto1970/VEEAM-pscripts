@@ -1547,11 +1547,75 @@ namespace VeeamLogAnonymizer
             return t;
         }
 
+        // PEM blocks (private keys, certificates, CSRs, public keys). The body spans several lines, which
+        // Veeam writes in different ways: real newlines with the log prefix repeated on every line
+        // ("[date] < tid> cli      | MIIH..."), "~n" escapes, "\n" in JSON, XML entities, or spaces.
+        // Only the base64 lines are removed: prefixes and separators are kept so the log layout survives.
+        private const string PemSep = @"\r?\n(?:\[[^\]\r\n]{5,40}\][^|\r\n]{0,60}\|[ \t]?)?|\\r\\n|\\n|~r~n|~n|&#13;&#10;|&#10;|&#xD;&#xA;|&#xA;|[ \t]+";
+        private static readonly Regex AxPemSplit = new Regex("(" + PemSep + ")", RegexOptions.Compiled);
+        private static readonly Regex AxPem = new Regex(@"-----BEGIN (?<l>[A-Z0-9 ]{3,40})-----(?<b>(?>(?:Proc-Type|DEK-Info|Comment):[^\r\n\\~]*|" + PemSep + @"|[A-Za-z0-9+/=]+){0,20000}?)-----END \k<l>-----", RO);
+        private static readonly Regex AxPemOpen = new Regex(@"-----BEGIN (?<l>[A-Z0-9 ]{3,40})-----(?<b>(?>(?:" + PemSep + @")?[A-Za-z0-9+/=]{16,}){1,1000}(?>(?:" + PemSep + @")?[A-Za-z0-9+/=]{1,15})?)(?![A-Za-z0-9+/=])", RO);   // truncated block (no END line)
+        private static readonly Regex RxPemToken = new Regex(@"^[A-Za-z0-9+/=]+$", RegexOptions.Compiled);
+
+        private string ReplacePem(string text)
+        {
+            if (text.IndexOf("-----BEGIN ", StringComparison.Ordinal) < 0 && text.IndexOf("MII", StringComparison.Ordinal) < 0) return text;
+            MatchEvaluator ev = delegate (Match m)
+            {
+                string label = m.Groups["l"].Value;
+                string body = m.Groups["b"].Value;
+                string[] parts = AxPemSplit.Split(body);       // even index = content, odd index = separator
+                StringBuilder sb = new StringBuilder();
+                bool marked = false, changed = false;
+                string pendingSep = "";
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    string p = parts[i];
+                    if (i % 2 == 1) { pendingSep += p; continue; }
+                    if (p.Length > 0 && RxPemToken.IsMatch(p))
+                    {
+                        changed = true;
+                        if (marked) { pendingSep = ""; continue; }   // drop the line together with its separator
+                        sb.Append(pendingSep).Append("REDACTED-PEM-").Append(label.Replace(' ', '-'));
+                        pendingSep = ""; marked = true;
+                        continue;
+                    }
+                    sb.Append(pendingSep).Append(p); pendingSep = "";
+                }
+                // a separator before "-----END" (e.g. the log prefix of the END line) belongs to the layout
+                if (m.Value.EndsWith("-----", StringComparison.Ordinal) && m.Groups["b"].Index + m.Groups["b"].Length < m.Index + m.Length)
+                    sb.Append(pendingSep);
+                if (!changed) return m.Value;
+                Stat(label.IndexOf("PRIVATE", StringComparison.Ordinal) >= 0 ? "PEM private key" : "PEM block", 1);
+                string nb = sb.ToString();
+                string end = m.Value.Substring(m.Groups["b"].Index - m.Index + m.Groups["b"].Length);
+                return "-----BEGIN " + label + "-----" + nb + end;
+            };
+            string t = text;
+            if (t.IndexOf("-----BEGIN ", StringComparison.Ordinal) >= 0)
+            {
+                t = AxPem.Replace(t, ev);
+                if (t.IndexOf("-----BEGIN ", StringComparison.Ordinal) >= 0) t = AxPemOpen.Replace(t, ev);
+            }
+            if (t.IndexOf("MII", StringComparison.Ordinal) >= 0)
+            {
+                // DER certificates / keys without PEM markers (e.g. VDDK "...with certificate" followed by base64 lines)
+                t = AxDerLines.Replace(t, delegate (Match m) { Stat("DER certificate/key", 1); return m.Groups["p"].Value + "REDACTED-DER-BLOB"; });
+                t = AxDerInline.Replace(t, delegate (Match m) { Stat("DER certificate/key", 1); return "REDACTED-DER-BLOB"; });
+            }
+            return t;
+        }
+
+        // "MII" = ASN.1 SEQUENCE with a two-byte length: the start of almost every base64 certificate or private key
+        private static readonly Regex AxDerLines = new Regex(@"(?m)^(?<p>[^\r\n]{0,120}?(?:\|[ \t]?(?:\[vddk\][ \t])?|[ \t]))MII[A-Za-z0-9+/]{40,76}={0,2}[ \t]*(?:\r?\n[^\r\n]{0,120}?\|[ \t]?(?:\[vddk\][ \t])?(?:[A-Za-z0-9+/]{16,76}={0,2}|[A-Za-z0-9+/]{2,15}={1,2})[ \t]*(?=\r?\n|$))+", RO);
+        private static readonly Regex AxDerInline = new Regex(@"(?<![A-Za-z0-9+/=])MII[A-Za-z0-9+/]{100,65536}={0,2}(?![A-Za-z0-9+/=])", RO);
+
         public string AnonymizeText(string text)
         {
             if (!_finalized) throw new InvalidOperationException("FinalizeDiscovery() must be called first");
             if (string.IsNullOrEmpty(text)) return text;
-            string t = ReplaceBase64(text);
+            string t = ReplacePem(text);
+            t = ReplaceBase64(t);
             return AnonymizeCore(t);
         }
 
