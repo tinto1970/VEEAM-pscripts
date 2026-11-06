@@ -5,6 +5,12 @@ Anonymizes a **Veeam Backup & Replication** support log bundle (the zip produced
 third party **without exposing** server names, IP addresses, users, domains, job / repository / bucket
 names, access keys, SIDs, MAC addresses and similar data.
 
+It covers the sensitive data categories listed in Veeam [KB2462](https://www.veeam.com/kb2462) (see
+[Coverage of Veeam KB2462](#coverage-of-veeam-kb2462)): besides the names and addresses above, also database
+and SQL instance names, certificate thumbprints, SSH fingerprints, Microsoft 365 tenants and Entra ID
+identifiers. It also removes PEM and DER private keys and certificates. After anonymizing, it checks the
+output for leaks and can restore the real names in an AI answer.
+
 It runs on Windows with nothing to install: **Windows PowerShell 5.1** (available on every Windows
 Server 2016+) or **PowerShell 7**. The engine is written in C# and compiled on the fly by PowerShell
 (`Add-Type`).
