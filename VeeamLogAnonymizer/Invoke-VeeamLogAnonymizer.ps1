@@ -106,7 +106,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$scriptVersion = '1.0.0'
+$scriptVersion = '1.1.0'
 
 # ------------------------------------------------------------------------------------------ engine
 function Import-AnonymizerEngine {

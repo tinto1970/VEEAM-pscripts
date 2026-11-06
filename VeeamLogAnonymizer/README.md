@@ -87,11 +87,44 @@ Example mapping (all values below are fictitious):
 | Domain SID | `S-1-5-21-1111111111-2222222222-3333333333-500` | `S-1-5-21-1000000000-1000000000-1000000001-500` |
 | MAC | `00:50:56:12:34:56` | `00:50:56:A0:00:01` (vendor OUI kept) |
 | Base64 / JWT | `c3J2LXZicjAxXEFkbWluaXN0cmF0b3I=` | decoded, anonymized and re-encoded; JWT signature removed |
+| Certificate thumbprint | `5A3F9C27E0B14D86A1C3F07B92E4D5A6C8B10F3E` | `AA00000000000000000000000000000000000001` (same length and format) |
+| SSL / SSH fingerprint | `ssh-rsa q8Zk3...vQk`, `46:D3:8D:...:22` | `ssh-rsa ANONFINGERPRINT000...02`, `AA:00:00:...:03` |
+| Database name | `DbName="SalesERP"`, `SalesERP_log`, `SalesERP_001.mdf` | `db001`, `db001_log`, `db001_001.mdf` (system and Veeam databases kept) |
+| SQL Server named instance | `SQL01\FINANCE` | `host004\SQLINST01` (`MSSQLSERVER`, `SQLEXPRESS`, `VEEAMSQL*` kept) |
+| Microsoft 365 tenant | `contoso.onmicrosoft.com`, `contoso-my.sharepoint.com` | `tenant01.onmicrosoft.com`, `tenant01-my.sharepoint.com` |
+| Entra ID / Azure IDs | `TenantId: 3f2504e0-4f89-...` | `TenantId: a0a0a0a0-0000-4000-8000-000000000001` |
 
 Special cases handled: names written with the Veeam file-name escaping (`s3_Boffsite_B...`), names
 truncated by Veeam with a random suffix (`...veeamrep_x7kq`), names glued to other text
 (`web01D2026-09-15T...vbk`, `esx2veeamworker`), space / underscore variants (`web01 Backup` /
 `web01_Backup`).
+
+## Coverage of Veeam KB2462
+
+Veeam [KB2462](https://www.veeam.com/kb2462) lists the kinds of sensitive data that Veeam logs can contain.
+This is how each one is handled:
+
+| KB2462 category | Handled | How |
+|---|---|---|
+| User names, Microsoft 365 user mailbox / group addresses | ✅ | `DOMAIN\user`, `user@domain`, profile paths, keyword contexts |
+| Hosts, FQDNs, NetBIOS names, IPv4 / IPv6 addresses | ✅ | learned names + domain suffixes; IPs preserve subnet relationships |
+| VMs, datastores, clusters, VM file names and paths | ✅ | vSphere / Hyper-V / Proxmox inventory contexts, `.vmx` paths, task log names |
+| Backup paths and backup file names | ✅ partly | job, repository, VM and host names inside paths are replaced; other folder names are not |
+| SQL Server database and instance names | ✅ | `DbName=`, `LogicalName=`, `Initial Catalog=`, `Instance=` (system DBs and default instances kept) |
+| Oracle SID / global name, PostgreSQL, MongoDB replica set, SAP HANA, Exchange / SharePoint databases | ✅ | `ORACLE_SID=`, `GlobalName=`, `database "x"`, `ReplicaSet=`, `TenantDatabase=`, `ContentDatabase=`, `MailboxDatabase=` |
+| SSH host fingerprints | ✅ | `ssh-rsa <fingerprint>`, `fingerprint: ...` |
+| Certificate thumbprints | ✅ | `thumbprint` / `fingerprint` contexts, hex with or without separators |
+| Microsoft 365 tenant, SharePoint site URLs | ✅ | `<tenant>.onmicrosoft.com`, `<tenant>(-my).sharepoint.com` |
+| Entra ID application / tenant / subscription IDs | ✅ | GUIDs after `TenantId`, `ApplicationId`, `AppId`, `client_id`, `SubscriptionId`, `login.microsoftonline.com/<id>` |
+| Passwords, keys, tokens (not in the KB, but they happen) | ✅ | `password=`, access keys, `Bearer`, JWT, Base64 blobs |
+| SQL / Oracle / PostgreSQL / MongoDB / SAP HANA **query results** | ❌ | free text: not detectable reliably |
+| SSH **script and command output** | ❌ | free text: not detectable reliably |
+| Exchange item subjects, SharePoint / OneDrive file and list names, Teams team / channel names | ❌ | free text: use `-ExtraTerms` |
+| File copy / file-to-tape paths, exported data paths | ⚠️ | only the known names inside them are replaced |
+| License information, hardware configuration | ⚠️ | license holder and hardware details are not touched |
+
+If your bundle contains logs from application-aware processing with transaction log backup, SSH scripts, or Veeam
+Backup for Microsoft 365, read the report and the bundle more carefully before sharing it.
 
 ## Useful options
 
@@ -148,6 +181,11 @@ mapping is loaded and extended, so `host017` stays the same server across all bu
 - Names that never appear in a recognizable context (for example a VM mentioned only in free text) can
   escape discovery. Add them manually.
 - Veeam GUIDs are not changed. They do not identify the customer, and they are needed to correlate the logs.
+  Only GUIDs that identify the customer's cloud (Entra ID tenant, application, subscription) are replaced.
+- Certificate thumbprints are all replaced, including those of public root CAs. If you need to troubleshoot
+  a certificate chain, add the relevant thumbprints with `-KeepTerms`.
+- Query results, script output and Microsoft 365 content (mail subjects, file names, Teams names) are free text
+  and are not detected. See [Coverage of Veeam KB2462](#coverage-of-veeam-kb2462).
 - Binary files in the bundle are copied unchanged and counted in the report.
 - Indicative timing: about 3–4 minutes for a bundle of 1.3 GB uncompressed.
 

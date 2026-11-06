@@ -137,6 +137,7 @@ namespace VeeamLogAnonymizer
 
         private static readonly string[] DefaultWhitelistDomains = {
             "veeam.com","microsoft.com","windows.com","windows.net","windowsupdate.com","microsoftonline.com",
+            "sharepoint.com","sharepoint.us","onmicrosoft.com","onmicrosoft.us","outlook.com","microsoft365.com","teams.microsoft.com",
             "azure.com","azure.net","azureedge.net","msftconnecttest.com","msocsp.com","live.com","office.com",
             "office365.com","amazonaws.com","aws.amazon.com","amazon.com","wasabisys.com","digicert.com",
             "entrust.net","verisign.com","globalsign.com","globalsign.net","letsencrypt.org","sectigo.com",
@@ -283,6 +284,35 @@ namespace VeeamLogAnonymizer
         private static readonly Regex DxFqdnToken =new Regex(@"(?<![\w.@-])(?<f>[A-Za-z0-9](?:[A-Za-z0-9-]{0,62})(?:\.[A-Za-z0-9-]{1,63}){1,10})(?![\w-]|\.[\w-])", RO);
         private static readonly Regex DxSmtp = new Regex(@"\b(?:smtp\s?server|mail\s?server|smtp)\b\s*[:=]?\s*['""\[(]?(?<h>[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9])", ROI);
 
+        // ---- categories listed in Veeam KB2462 (sensitive data in logs)
+        // certificate thumbprints, SSL fingerprints, SSH host key fingerprints
+        private static readonly Regex DxThumb = new Regex(@"(?:thumb|finger)\s?print\w{0,12}(?:&(?:amp;)*quot;|[^A-Za-z0-9\r\n]){0,24}(?:value(?:&(?:amp;)*quot;|[^A-Za-z0-9\r\n]){1,16}|is\s|(?:ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-nistp\d{3}|SHA256|SHA1|MD5)[:\s]\s?)?(?<v>[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){15,63}|[0-9A-Fa-f]{32,128}|[A-Za-z0-9+/]{43}=?)(?![A-Za-z0-9+/=:-])", ROI);
+        private static readonly Regex DxSshKeyFp = new Regex(@"\b(?:ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-nistp\d{3})\s(?:SHA256:)?(?<v>[A-Za-z0-9+/]{43}=?)(?![A-Za-z0-9+/=])", RO);
+        // database names: SQL Server, PostgreSQL, Oracle, MongoDB, SAP HANA, Exchange, SharePoint
+        private static readonly Regex DxDbQ = new Regex(@"\b(?:DbName|DatabaseName|Database|db_?name|LogicalName|ContentDatabase|MailboxDatabase|ReplicaSet(?:Name)?|replSet|OracleSid|ORACLE_SID|GlobalName|global_name|OracleHomeName|ORACLE_HOME_NAME|TenantDatabase|PdbName|CdbName|CollectionName)\s*[=:]\s*(?:&(?:amp;)*quot;|[""'\[])(?<d>[A-Za-z_][\w$#.-]{0,127}?)(?:&(?:amp;)*quot;|[""'\]])", ROI);
+        private static readonly Regex DxDbConn = new Regex(@"\b(?:Initial\s?Catalog|Database|dbname)\s*=\s*(?<d>[A-Za-z_][\w$#-]{0,127})(?=[;\s&""']|$)", ROI);
+        private static readonly Regex DxDbWord = new Regex(@"\b(?:database|tenant database|replica set|pluggable database)\s(?:&(?:amp;)*quot;|[""'\[])(?<d>[A-Za-z_][\w$#.-]{0,127}?)(?:&(?:amp;)*quot;|[""'\]])", ROI);
+        // SQL Server named instances ("HOST\INSTANCE")
+        private static readonly Regex DxSqlInstance = new Regex(@"\b(?:Instance(?:Name)?|SqlInstance|ServerInstance|SqlServerInstance)\s*[=:]\s*(?:&(?:amp;)*quot;|[""'\[])?(?:(?<h>[A-Za-z0-9][\w.-]{0,62})\\{1,2})?(?<i>[A-Za-z_][\w$#-]{0,62})(?=&(?:amp;)*quot;|[""'\]\s,;]|$)", ROI);
+        // Microsoft 365 tenant names and Entra ID / Azure identifiers
+        private static readonly Regex DxM365Tenant = new Regex(@"(?<![\w.-])(?<t>[a-z0-9][a-z0-9-]{1,61}?)(?:-my|-admin|-files)?\.(?:sharepoint\.(?:com|us|de|cn)|(?:mail\.)?onmicrosoft\.(?:com|us|de))\b", ROI);
+        private static readonly Regex DxCloudId = new Regex(@"(?:\b(?:tenant|application|app|directory|subscription|azure\s?ad\s?user|entra\s?user)[\s_]?id\b|\bclient_id\b|microsoftonline\.(?:com|us)/|/subscriptions/|/tenants/)(?:&(?:amp;)*quot;|[^A-Za-z0-9\r\n]){0,12}\{?(?<g>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})", ROI);
+
+        private static readonly HashSet<string> DefaultDbNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+            "master","model","msdb","tempdb","resource","mssqlsystemresource","tempdev","templog","modeldev","modellog",
+            "msdbdata","msdblog","mastlog","distribution","ReportServer","ReportServerTempDB","SSISDB","DWConfiguration",
+            "DWDiagnostics","DWQueue","VAO","postgres","template0","template1","admin","config","local","SYSTEMDB",
+            "orcl","orclpdb","orclpdb1","orclcdb","xe","xepdb1","cdb$root","pdb$seed","SharePoint_Config","WSS_Content",
+            "WSS_Logging","SharePoint_AdminContent","SearchService","SharePoint","sys","system","information_schema",
+            "mysql","performance_schema","true","false","null","none","default","n/a","unknown","empty","primary","secondary",
+            "data","log","rows","file","files","name","value","id"
+        };
+        private static readonly HashSet<string> DefaultSqlInstances = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+            "MSSQLSERVER","SQLEXPRESS","MICROSOFT##WID","MICROSOFT##SSEE","SHAREPOINT","SQL","SQLSERVER","LOCALDB","MSSQLLocalDB",
+            "DEFAULT","NONE","NULL","TRUE","FALSE"
+        };
+        private static readonly Regex RxDefaultDbFile = new Regex(@"^(?:temp\d+|tempdev\d*|templog\d*|Veeam.*|VBR.*|VB365.*)$", ROI);
+
         // ================================================================== anonymization regexes
         private static readonly Regex AxIPv4 = new Regex(@"(?<!\d\.|\d)(?<ip>(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})(?!\d|\.\d)", RO);
         private static readonly Regex AxIPv6 = new Regex(@"(?:(?<=[G-Zg-z_]:)|(?<![\w:.]))(?<ip>[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7})(?:%(?<z>[\w.]+))?(?![\w:]|\.\d)", RO);
@@ -315,7 +345,7 @@ namespace VeeamLogAnonymizer
 
         private void Stat(string k, long n) { long v; _stats.TryGetValue(k, out v); _stats[k] = v + n; }
 
-        private static readonly string[] CategoryOrder = { "Secret", "AccessKey", "Custom", "Domain", "Host", "User", "Job", "Repository", "Bucket", "StorageAccount", "Share", "Datastore", "VM", "Inventory" };
+        private static readonly string[] CategoryOrder = { "Secret", "AccessKey", "Thumbprint", "CloudId", "Custom", "Tenant", "Domain", "Host", "SqlInstance", "Database", "User", "Job", "Repository", "Bucket", "StorageAccount", "Share", "Datastore", "VM", "Inventory" };
         private static int Prio(string c) { int i = Array.IndexOf(CategoryOrder, c); return i < 0 ? 99 : i; }
 
         private void AddCandidate(string value, string category, string source, long weight)
@@ -614,6 +644,26 @@ namespace VeeamLogAnonymizer
                 else AddCandidate(nm, "Inventory", "vsphere-ref:" + t);
             }
             for (m = DxVmColon.Match(text); m.Success; m = m.NextMatch()) { string o = m.Groups["o"].Value; if (IsObjectName(o)) AddCandidate(o, "VM", "kw:vm"); }
+            // KB2462 categories
+            for (m = DxThumb.Match(text); m.Success; m = m.NextMatch()) { string v = m.Groups["v"].Value; if (IsFingerprintValue(v)) AddCandidate(v, "Thumbprint", "kw:thumbprint"); }
+            for (m = DxSshKeyFp.Match(text); m.Success; m = m.NextMatch()) { string v = m.Groups["v"].Value; if (IsFingerprintValue(v)) AddCandidate(v, "Thumbprint", "ssh-fingerprint"); }
+            for (m = DxDbQ.Match(text); m.Success; m = m.NextMatch()) DbCandidate(m.Groups["d"].Value, "kw:database");
+            for (m = DxDbConn.Match(text); m.Success; m = m.NextMatch()) DbCandidate(m.Groups["d"].Value, "connection-string");
+            for (m = DxDbWord.Match(text); m.Success; m = m.NextMatch()) DbCandidate(m.Groups["d"].Value, "kw:database");
+            for (m = DxSqlInstance.Match(text); m.Success; m = m.NextMatch())
+            {
+                string i = m.Groups["i"].Value;
+                if (DefaultSqlInstances.Contains(i) || i.StartsWith("VEEAMSQL", StringComparison.OrdinalIgnoreCase) || IsKeep(i) || Stop.Contains(i)) continue;
+                if (!m.Groups["h"].Success && !HasDigitOrHyphen(i) && i != i.ToUpperInvariant()) continue;   // bare word: accept only INSTANCE-like names
+                if (IsObjectName(i) && i.Length >= 3) AddCandidate(i, "SqlInstance", "kw:instance");
+            }
+            for (m = DxM365Tenant.Match(text); m.Success; m = m.NextMatch()) { string t = m.Groups["t"].Value; if (t.Length >= 3 && IsObjectName(t) && !IsKeep(t)) AddCandidate(t, "Tenant", "m365-domain"); }
+            for (m = DxCloudId.Match(text); m.Success; m = m.NextMatch())
+            {
+                string g = m.Groups["g"].Value;
+                if (g.Trim('0', '-').Length == 0) continue;     // empty GUID
+                AddCandidate(g, "CloudId", "kw:cloud-id");
+            }
             if (_domUsers.Count < 20000)
                 for (m = DxAnyDomUser.Match(text); m.Success; m = m.NextMatch())
                 {
@@ -662,6 +712,78 @@ namespace VeeamLogAnonymizer
             return true;
         }
 
+        private static bool IsFingerprintValue(string v)
+        {
+            if (string.IsNullOrEmpty(v) || RxGuidAnywhere.IsMatch(v)) return false;
+            string hex = v.Replace(":", "").Replace("-", "");
+            bool isHex = hex.All(Uri.IsHexDigit);
+            if (isHex)
+            {
+                if (hex.Distinct().Count() < 4) return false;            // 0000..., FFFF...
+                return hex.Any(char.IsDigit) && hex.Any(char.IsLetter);
+            }
+            // base64 SSH fingerprint: mixed case + digits, not a word
+            return v.Any(char.IsDigit) && v.Any(char.IsUpper) && v.Any(char.IsLower);
+        }
+
+        private void DbCandidate(string d, string source)
+        {
+            if (string.IsNullOrEmpty(d)) return;
+            d = d.Trim().TrimEnd('.');
+            // SQL logical file names: "<db>_log", "<db>_data"
+            string baseName = Regex.Replace(d, @"(?i)_(?:log|data|dat|primary)(?:_?\d+)?$", "");
+            if (baseName.Length >= 3) d = baseName;
+            if (d.Length < 3 || DefaultDbNames.Contains(d) || RxDefaultDbFile.IsMatch(d)) return;
+            if (IsKeep(d) || Stop.Contains(d)) return;
+            if (!IsObjectName(d) && !(IsCamel(d) && IsObjectName(d + "_x"))) return;   // CamelCase is normal for database names
+            AddCandidate(d, "Database", source);
+        }
+
+        private int _fpCounter;
+        // format-preserving placeholder for a thumbprint / fingerprint (same length, separators and alphabet)
+        private string MakeFingerprintFake(string original)
+        {
+            _fpCounter++;
+            string hex = original.Replace(":", "").Replace("-", "");
+            string fake;
+            if (hex.All(Uri.IsHexDigit))
+            {
+                string n = _fpCounter.ToString("x");
+                string body = ("aa" + new string('0', Math.Max(0, hex.Length - 2 - n.Length)) + n);
+                if (body.Length > hex.Length) body = body.Substring(body.Length - hex.Length);
+                if (original.Any(char.IsLetter) && original.Where(char.IsLetter).All(char.IsUpper)) body = body.ToUpperInvariant();
+                char sep = original.IndexOf(':') >= 0 ? ':' : original.IndexOf('-') >= 0 ? '-' : '\0';
+                if (sep == '\0') fake = body;
+                else
+                {
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < body.Length; i += 2) { if (i > 0) sb.Append(sep); sb.Append(body, i, Math.Min(2, body.Length - i)); }
+                    fake = sb.ToString();
+                }
+            }
+            else
+            {
+                bool pad = original.EndsWith("=");
+                int len = original.Length - (pad ? 1 : 0);
+                string n = _fpCounter.ToString();
+                fake = "ANONFINGERPRINT";
+                fake = fake + new string('0', Math.Max(0, len - fake.Length - n.Length)) + n;
+                if (pad) fake += "=";
+            }
+            if (_usedFakes.Contains(fake)) return MakeFingerprintFake(original);
+            _usedFakes.Add(fake);
+            return fake;
+        }
+
+        private int _guidCounter;
+        private string MakeGuidFake()
+        {
+            _guidCounter++;
+            string f = "a0a0a0a0-0000-4000-8000-" + _guidCounter.ToString().PadLeft(12, '0');
+            _usedFakes.Add(f);
+            return f;
+        }
+
         private static bool IsMasked(string s)
         {
             if (string.IsNullOrEmpty(s)) return true;
@@ -693,6 +815,9 @@ namespace VeeamLogAnonymizer
                 case "Inventory": prefix = "inventory"; width = 2; break;
                 case "Secret": prefix = "REDACTED-SECRET-"; width = 3; break;
                 case "AccessKey": prefix = "ANONACCESSKEY"; width = 7; break;
+                case "Database": prefix = "db"; width = 3; break;
+                case "SqlInstance": prefix = "SQLINST"; width = 2; break;
+                case "Tenant": prefix = "tenant"; width = 2; break;
                 default: prefix = "term"; width = 3; break;
             }
             while (true)
@@ -713,7 +838,10 @@ namespace VeeamLogAnonymizer
                 if (bare) e.Bare = true;
                 return e;
             }
-            e = new MapEntry { Category = category, Original = original, Fake = NextFake(category), Bare = bare, Source = source };
+            string fake = category == "Thumbprint" ? MakeFingerprintFake(original)
+                        : category == "CloudId" ? MakeGuidFake()
+                        : NextFake(category);
+            e = new MapEntry { Category = category, Original = original, Fake = fake, Bare = bare, Source = source };
             _terms[original] = e;
             return e;
         }
@@ -861,7 +989,7 @@ namespace VeeamLogAnonymizer
                 MapEntry existing;
                 if (_terms.TryGetValue(c.Value, out existing)) { existing.Bare = true; continue; }
                 string nk = NormName(c.Value);
-                if (c.Category != "Secret" && c.Category != "AccessKey" && norm.TryGetValue(nk, out existing))
+                if (c.Category != "Secret" && c.Category != "AccessKey" && c.Category != "Thumbprint" && c.Category != "CloudId" && norm.TryGetValue(nk, out existing))
                 {
                     // "web01_Backup" and "web01 Backup" are the same job: reuse the placeholder
                     MapEntry alias = new MapEntry { Category = existing.Category, Original = c.Value, Fake = existing.Fake, Bare = true, Source = c.Source + " (alias)" };
